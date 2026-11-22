@@ -38,7 +38,7 @@ EVIDENCE = {
     "claim_001": TWO_NEWS,
     "claim_002": [src("sec.gov", "government"), src("ir.tesla.com", "web")],
     "claim_003": [src("iea.org", "institution", content="14 million in 2023")],
-    "claim_004": [src("nasa.gov", "government"), src("snopes.com", "news")],
+    "claim_004": [src("nasa.gov", "government", content="The wall is 8 metres wide."), src("snopes.com", "news")],
     "claim_005": [src("random.com")],
     "claim_006": None,  # never searched
 }
@@ -46,8 +46,8 @@ EVIDENCE = {
 REPLIES = {
     "claim_001": verdict("VERIFIED", sup=(1, 2), conf=92),
     "claim_002": verdict("VERIFIED", sup=(1, 2), conf=95),
-    "claim_003": verdict("INACCURATE", sup=(), con=(1,), conf=80, corrected="Global EV sales were 14 million in 2023."),
-    "claim_004": verdict("FALSE", sup=(), con=(1, 2), conf=94, corrected="It is not visible."),
+    "claim_003": verdict("INACCURATE", sup=(), con=(1,), conf=80, corrected="Global EV sales were 14 million in 2023.", corrected_value="14 million"),
+    "claim_004": verdict("FALSE", sup=(), con=(1, 2), conf=94, corrected="The wall is 8 metres wide.", corrected_value="8 metres"),
     "claim_005": verdict("UNVERIFIED", sup=(), conf=30, ctype="prediction"),
 }
 
@@ -95,7 +95,7 @@ def test_claim_rows_carry_verdict_fields_and_real_sources(client, monkeypatch):
     f = by["claim_004"]
     assert f["status"] == "FALSE" and f["confidence_score"] == 94
     assert f["supporting_count"] == 0 and f["contradicting_count"] == 2
-    assert f["verification"]["corrected_claim"] == "It is not visible."
+    assert f["verification"]["corrected_claim"] == "The wall is 8 metres wide."
     assert {s["url"] for s in f["verification"]["contradicting_sources"]} <= {s["url"] for s in f["collected_sources"]}
     ok = by["claim_001"]
     assert ok["supporting_count"] == 2 and [s["domain"] for s in ok["collected_sources"]] == ["reuters.com", "bbc.com"]

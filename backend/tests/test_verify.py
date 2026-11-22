@@ -38,8 +38,9 @@ def src(domain, stype="web", path="p", content="evidence text", date=None, score
     }
 
 
-def verdict(status="VERIFIED", sup=(1,), con=(), conf=90, ctype="factual", corrected=None, expl="Because the evidence says so."):
+def verdict(status="VERIFIED", sup=(1,), con=(), conf=90, ctype="factual", corrected=None, expl="Because the evidence says so.", **extra):
     return {
+        **extra,
         "claim_type": ctype,
         "verification_status": status,
         "explanation": expl,
@@ -132,12 +133,12 @@ def test_supported_claim_is_verified(client, monkeypatch):
 
 
 def test_contradicted_claim_is_false(client, monkeypatch):
-    fid = setup(client, [C1], {"claim_001": [src("gov.example.gov", "government"), src("x.org")]})
-    FakeLLM(monkeypatch, {"claim_001": verdict("FALSE", sup=(), con=(1,), conf=92, corrected="Completed in 1889? no: 1890")})
+    fid = setup(client, [C1], {"claim_001": [src("gov.example.gov", "government", content="Opened in 1890."), src("x.org")]})
+    FakeLLM(monkeypatch, {"claim_001": verdict("FALSE", sup=(), con=(1,), conf=92, corrected="It was completed in 1890.", corrected_value="1890")})
     r = one(client, fid)
     assert r["verification_status"] == "FALSE"
     assert r["contradicting_sources"][0]["domain"] == "gov.example.gov"
-    assert r["corrected_claim"] == "Completed in 1889? no: 1890"
+    assert r["corrected_claim"] == "It was completed in 1890." and r["correction_status"] == "confirmed"
 
 
 def test_outdated_statistic_is_inaccurate_with_correction(client, monkeypatch):
@@ -146,7 +147,7 @@ def test_outdated_statistic_is_inaccurate_with_correction(client, monkeypatch):
     fid = setup(client, [c], {"claim_001": ev})
     fake = FakeLLM(
         monkeypatch,
-        {"claim_001": verdict("INACCURATE", sup=(), con=(1,), conf=80, corrected="Global EV sales reached 14 million in 2023 (10 million in 2022).")},
+        {"claim_001": verdict("INACCURATE", sup=(), con=(1,), conf=80, corrected="Global EV sales reached 14 million in 2023 (10 million in 2022).", corrected_value="14 million")},
     )
     r = one(client, fid)
     assert r["verification_status"] == "INACCURATE" and "14 million" in r["corrected_claim"]

@@ -1,4 +1,5 @@
 import { ExternalLink, Info } from "lucide-react";
+import CorrectionBox from "./CorrectionBox";
 import type { VerdictSource, VerificationResult } from "@/types";
 
 const BAR: Record<string, string> = {
@@ -42,6 +43,11 @@ function SourceList({ title, sources, tone }: { title: string; sources: VerdictS
               <span className="text-sm font-semibold text-navy-800">{s.title}</span>
             )}
             {s.relevance && <p className="mt-1 text-xs text-slate-600">{s.relevance}</p>}
+            {s.snippet && (
+              <blockquote className="mt-1.5 break-words border-l-2 border-slate-200 pl-2 text-xs italic leading-relaxed text-slate-500">
+                {s.snippet}
+              </blockquote>
+            )}
           </li>
         ))}
       </ul>
@@ -65,12 +71,7 @@ export default function VerdictPanel({ result, detailsOpen }: { result: Verifica
         </p>
       )}
 
-      {result.corrected_claim && (
-        <div className="rounded-xl bg-orange-50 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-orange-700">Corrected information</p>
-          <p className="mt-1 text-sm text-slate-800">{result.corrected_claim}</p>
-        </div>
-      )}
+      <CorrectionBox result={result} />
 
       <div>
         <div className="flex items-center justify-between text-xs text-slate-500">

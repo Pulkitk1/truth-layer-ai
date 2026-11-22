@@ -133,7 +133,11 @@ export interface VerdictSource {
   domain: string;
   source_type: SourceType | string;
   published_date: string | null;
+  /** Evidence text as collected from the page (not written by the AI). */
+  snippet?: string;
 }
+
+export type CorrectionStatus = "confirmed" | "not_confirmed" | "not_applicable";
 
 /** AI fact-check result for one claim (real output, never demo data). */
 export interface VerificationResult {
@@ -145,6 +149,13 @@ export interface VerificationResult {
   claim_type: "factual" | "prediction" | "hypothetical" | "not_verifiable";
   explanation: string;
   corrected_claim: string | null;
+  original_value?: string | null;
+  corrected_value?: string | null;
+  unit?: string | null;
+  reference_period?: string | null;
+  correction_explanation?: string | null;
+  /** "confirmed" only when the corrected figure appears in a cited source. */
+  correction_status?: CorrectionStatus;
   confidence_score: number | null;
   evidence_summary: string;
   supporting_sources: VerdictSource[];

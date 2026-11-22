@@ -30,6 +30,7 @@ interface ClaimOpts {
   contradicting?: EvidenceSourceItem[];
   other?: EvidenceSourceItem[];
   corrected?: string | null;
+  correctedValue?: string | null;
 }
 
 export function claim(o: ClaimOpts): ReportClaim {
@@ -56,6 +57,12 @@ export function claim(o: ClaimOpts): ReportClaim {
           claim_type: "factual",
           explanation: `Explanation for ${id}`,
           corrected_claim: o.corrected ?? null,
+          original_value: o.correctedValue ? "10 million" : null,
+          corrected_value: o.correctedValue ?? null,
+          unit: o.correctedValue ? "units" : null,
+          reference_period: o.correctedValue ? "2023" : null,
+          correction_explanation: o.correctedValue ? "The source reports 14 million units." : null,
+          correction_status: o.correctedValue ? "confirmed" : o.status === "INACCURATE" || o.status === "FALSE" ? "not_confirmed" : "not_applicable",
           confidence_score: o.confidence ?? 80,
           evidence_summary: `Summary for ${id}`,
           supporting_sources: sup.map(verdict),
@@ -91,7 +98,7 @@ export function claim(o: ClaimOpts): ReportClaim {
 export const CLAIMS: ReportClaim[] = [
   claim({ id: 1, text: "Alpha revenue grew 10 percent in 2023.", status: "VERIFIED", category: "financial", page: 1, confidence: 92, supporting: [source("reuters.com", { published_date: "2024-02-01" }), source("sec.gov", { source_type: "government" })] }),
   claim({ id: 2, text: "Beta market reached 50 billion dollars.", status: "VERIFIED", category: "market", page: 2, confidence: 70, supporting: [source("bbc.com")] }),
-  claim({ id: 3, text: "Gamma sold 10 million units in 2022.", status: "INACCURATE", category: "market", page: 3, confidence: 80, contradicting: [source("iea.org", { source_type: "institution" })], corrected: "Gamma sold 14 million units in 2023." }),
+  claim({ id: 3, text: "Gamma sold 10 million units in 2022.", status: "INACCURATE", category: "market", page: 3, confidence: 80, contradicting: [source("iea.org", { source_type: "institution" })], corrected: "Gamma sold 14 million units in 2023.", correctedValue: "14 million" }),
   claim({ id: 4, text: "Delta is visible from the Moon.", status: "FALSE", category: "scientific", page: 5, confidence: 95, contradicting: [source("nasa.gov", { source_type: "government" }), source("snopes.com")] }),
   claim({ id: 5, text: "Epsilon will have 1 billion users by 2030.", status: "UNVERIFIED", category: "statistics", page: 7, confidence: 30, other: [source("random.com", { source_type: "web" })] }),
   claim({ id: 6, text: "Zeta sales rose sharply last year.", status: "PENDING", category: "statistics", page: 9 }),

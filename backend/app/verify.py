@@ -11,7 +11,7 @@ from datetime import date
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from . import config, llm, storage
+from . import config, grounding, llm, storage
 from .llm import LlmError
 from .search_schemas import ClaimSearchResult, Source
 from .verify_schemas import (
@@ -23,6 +23,7 @@ from .verify_schemas import (
 )
 
 _LOCK = threading.Lock()
+PROMPT_VERSION = "2"  # bump when the verdict format changes: older cached verdicts are checked again
 FATAL_CODES = {"groq_not_configured", "groq_auth_failed", "groq_rate_limited", "groq_daily_limit", "groq_model_not_found"}
 STRONG = {"government", "institution", "research", "news"}  # authoritative source types
 WEAK = {"community"}  # blogs and forums never establish a verdict alone
@@ -35,7 +36,7 @@ Use ONLY the numbered evidence provided. Never use outside knowledge to fill gap
 
 VERDICTS
 - VERIFIED: reliable evidence directly supports the claim; the important figures, dates, units, entities and context all match; no significant reliable evidence contradicts it.
-- INACCURATE: the claim is partly right but a figure, date, percentage, financial amount or technical detail is wrong, OR it is outdated (was true once but is not current), OR it is materially misleading. Give the corrected information in corrected_claim when the evidence supports it.
+- INACCURATE: the claim is partly right but a figure, date, percentage, financial amount or technical detail is wrong, OR it is outdated (was true once but is not current), OR it is materially misleading. Give the corrected information when the evidence supports it.
 - FALSE: reliable, authoritative evidence directly contradicts the claim and establishes it is wrong. A lack of evidence is NEVER a reason for FALSE.
 - UNVERIFIED: evidence is missing, insufficient, irrelevant or unreliable; sources conflict and the conflict cannot be resolved (explain the disagreement, do not pick a side arbitrarily); or the claim is too vague or not objectively verifiable. Do not force a definitive verdict.
 
@@ -48,6 +49,13 @@ SPECIAL CASES
 - Not objectively verifiable statements: claim_type "not_verifiable", verdict UNVERIFIED.
 - Financial claims: check currency, reporting period, company identity and units. Percentages and market statistics: check the measurement period, base and context. Technical claims: prefer official documentation and recognised research.
 
+CORRECTIONS (the most important part of an INACCURATE or FALSE verdict)
+- Say what is wrong, why, and what the correct fact is. Take the correct figure ONLY from the numbered evidence, preferring primary sources (government, official statistics, company filings, international bodies) over secondary ones, and copy the figure as the source states it. Never use a number from memory.
+- corrected_value is the figure alone (e.g. "1.43 billion", "17.3%"); put the unit or currency in "unit" and the year or period the figure refers to in "reference_period" (the source's reference year, not today's date). original_value is the figure as the claim states it. Keep currencies, units and periods exactly as in the source.
+- Cite the source(s) that contain the corrected figure under supporting_sources or contradicting_sources.
+- If the evidence shows the claim is wrong but does not contain a reliable correct figure, leave corrected_claim, corrected_value and correction_explanation null. Do not guess a replacement.
+- Distinguish a historical figure from a current one: if the claim was right for its year, say so and give the current figure with its own year.
+
 confidence_score (0-100) is the strength of the available evidence for your verdict, not a probability. Use high values only when strong, directly relevant sources agree. Use low values when evidence is weak, indirect, old or conflicting.
 
 Respond with ONLY this JSON object:
@@ -55,6 +63,11 @@ Respond with ONLY this JSON object:
  "verification_status": "VERIFIED|INACCURATE|FALSE|UNVERIFIED",
  "explanation": "reasoning that names what the evidence says",
  "corrected_claim": null or "the corrected statement (only for INACCURATE/FALSE, only if the evidence supports it)",
+ "original_value": null or "the figure the claim states",
+ "corrected_value": null or "the evidence-supported figure",
+ "unit": null or "unit or currency of the figures",
+ "reference_period": null or "year/period the corrected figure refers to",
+ "correction_explanation": null or "why the corrected information is right, naming the source(s)",
  "confidence_score": 0-100,
  "evidence_summary": "short summary of what the evidence shows",
  "supporting_sources": [{"source": 1, "relevance": "why it supports"}],
@@ -138,6 +151,25 @@ ILLUSTRATIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+SCALE_WORDS = ("thousand", "million", "billion", "trillion", "lakh", "crore")
+
+
+def _clean_unit(unit: str | None, *values: str | None) -> str | None:
+    """Drop a scale word the model repeated in the unit ("billion people" next to "1.46 billion")."""
+    if not unit:
+        return None
+    parts = unit.split()
+    shown = " ".join(v.lower() for v in values if v)
+    while parts and parts[0].lower() in SCALE_WORDS and parts[0].lower() in shown:
+        parts.pop(0)
+    return " ".join(parts) or None
+
+
+def _snippet(text: str, limit: int = 400) -> str:
+    text = re.sub(r"\s+", " ", text or "").strip()
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
+
+
 def _resolve(cites, sources: list[Source], dropped: list[int]) -> list[VerdictSource]:
     out, seen = [], set()
     for c in cites:
@@ -156,6 +188,7 @@ def _resolve(cites, sources: list[Source], dropped: list[int]) -> list[VerdictSo
                 domain=s.domain,
                 source_type=s.source_type,
                 published_date=s.published_date,
+                snippet=_snippet(s.content),
             )
         )
     return out
@@ -233,8 +266,27 @@ def apply_rules(claim: dict, raw: RawVerdict, sources: list[Source]) -> Verifica
     if conf != raw.confidence_score:
         notes.append(f"Confidence limited to {conf} because of the strength of the cited evidence.")
 
-    if status not in ("INACCURATE", "FALSE"):
-        corrected = None
+    original_value = raw.original_value or (str(claim["value"]) if claim.get("value") not in (None, "") else None)
+    unit = raw.unit or claim.get("unit")
+    corrected_value, period, why = raw.corrected_value, raw.reference_period, raw.correction_explanation
+    unit = _clean_unit(unit, original_value, raw.corrected_value)
+    correction_status = "not_applicable"
+    if status in ("INACCURATE", "FALSE"):
+        correction_status = "not_confirmed"
+        if (corrected or corrected_value) and (sup or con):
+            cited = {s.url for s in sup + con}
+            texts = [f"{x.title} {x.content}" for x in sources if x.url in cited]
+            if corrected_value and grounding.grounded(corrected_value, texts):
+                correction_status = "confirmed"
+            elif corrected_value:
+                notes.append("The AI suggested a corrected figure that does not appear in the cited sources, so it was discarded.")
+            else:
+                notes.append("The corrected statement states no figure that could be checked against the sources, so it was discarded.")
+        if correction_status != "confirmed":
+            corrected = corrected_value = period = why = None
+            conf = min(conf, 60)
+    else:
+        corrected = corrected_value = period = why = original_value = unit = None
 
     explanation = raw.explanation
     if downgraded:
@@ -248,6 +300,12 @@ def apply_rules(claim: dict, raw: RawVerdict, sources: list[Source]) -> Verifica
         claim_type=claim_type,
         explanation=explanation,
         corrected_claim=corrected,
+        original_value=original_value,
+        corrected_value=corrected_value,
+        unit=unit,
+        reference_period=period,
+        correction_explanation=why,
+        correction_status=correction_status,
         confidence_score=conf,
         evidence_summary=raw.evidence_summary,
         supporting_sources=sup,
@@ -288,7 +346,7 @@ def _failed(claim: dict, code: str, message: str) -> VerificationResult:
 
 def fingerprint(claim: dict, sources: list[Source]) -> str:
     """Identifies exactly what a verdict was based on, so changed evidence/model triggers a re-check."""
-    payload = [claim["claim_text"], config.groq_model(), [[s.url, s.content, s.published_date] for s in sources]]
+    payload = [PROMPT_VERSION, claim["claim_text"], config.groq_model(), [[s.url, s.content, s.published_date] for s in sources]]
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()[:24]
 
 

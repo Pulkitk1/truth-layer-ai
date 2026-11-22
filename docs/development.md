@@ -184,6 +184,15 @@ The result is slower but reliable: expect roughly 10-30 seconds per claim when v
 (10 claims took about 3 minutes in testing). The UI verifies one claim at a time for the same reason. For faster runs,
 use a Groq plan or model with a higher tokens-per-minute limit and set `GROQ_MODEL` accordingly.
 
+### Corrections: what is right instead
+
+For an INACCURATE or FALSE claim the verdict also carries `original_value`, `corrected_value`, `unit`, `reference_period`, `corrected_claim`, `correction_explanation` and `correction_status`.
+
+- For claims that state a figure, the search step runs a second query for the authoritative figure itself (without the claim's number), so a wrong claim can still be corrected. Both result sets are merged and ranked, with government, institutional and research sources first.
+- The AI may only take the correct figure from the numbered evidence. The backend then checks that the figure really appears (compared by value, so "1.43 billion" matches "1,428,627,663"; years must match exactly) in a source the AI cited. If it does not, the correction is discarded and `correction_status` is `not_confirmed`; the verdict itself stays. A confirmed correction is `confirmed`; claims that are not INACCURATE/FALSE are `not_applicable`.
+- Every cited source carries the evidence `snippet` as collected from the page, never text written by the AI.
+- Corrections are stored with the verdict in Neon and appear in the dashboard and the PDF report. Results are not deterministic: web search results and AI output vary between runs, so a correction may be found in one run and not another.
+
 ## Database (Neon PostgreSQL)
 
 Neon PostgreSQL is the **only** persistent storage: documents, claims, evidence, verdicts, report metadata, processing

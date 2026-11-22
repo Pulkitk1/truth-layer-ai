@@ -42,6 +42,11 @@ class RawVerdict(BaseModel):
     verification_status: VerificationStatus
     explanation: str = Field(min_length=1)
     corrected_claim: str | None = None
+    original_value: str | None = None
+    corrected_value: str | None = None
+    unit: str | None = None
+    reference_period: str | None = None
+    correction_explanation: str | None = None
     confidence_score: int = 0
     evidence_summary: str = ""
     supporting_sources: list[SourceCitation] = Field(default_factory=list)
@@ -62,6 +67,22 @@ class RawVerdict(BaseModel):
     @classmethod
     def _text(cls, v):
         return str(v).strip()[:2000] if v is not None else ""
+
+    @field_validator("original_value", "corrected_value", "unit", "reference_period", mode="before")
+    @classmethod
+    def _short(cls, v):
+        if v is None or isinstance(v, (dict, list)):
+            return None
+        v = str(v).strip()
+        return v[:200] if v and v.lower() not in {"null", "none", "n/a", "unknown"} else None
+
+    @field_validator("correction_explanation", mode="before")
+    @classmethod
+    def _cexp(cls, v):
+        if not isinstance(v, str):
+            return None
+        v = v.strip()
+        return v[:1500] if v and v.lower() not in {"null", "none", "n/a"} else None
 
     @field_validator("corrected_claim", mode="before")
     @classmethod
@@ -94,6 +115,12 @@ class VerdictSource(BaseModel):
     domain: str
     source_type: str
     published_date: str | None = None
+    snippet: str = ""  # the evidence text as collected from the page (never written by the AI)
+
+
+# confirmed: the corrected figure appears in a cited source. not_confirmed: the claim is wrong but no reliable
+# correction could be established. not_applicable: the claim is not INACCURATE/FALSE.
+CorrectionStatus = Literal["confirmed", "not_confirmed", "not_applicable"]
 
 
 class VerificationResult(BaseModel):
@@ -106,6 +133,12 @@ class VerificationResult(BaseModel):
     claim_type: ClaimType = "factual"
     explanation: str = ""
     corrected_claim: str | None = None
+    original_value: str | None = None
+    corrected_value: str | None = None
+    unit: str | None = None
+    reference_period: str | None = None
+    correction_explanation: str | None = None
+    correction_status: CorrectionStatus = "not_applicable"
     confidence_score: int | None = None  # strength of the evidence, not a calibrated probability
     evidence_summary: str = ""
     supporting_sources: list[VerdictSource] = Field(default_factory=list)

@@ -36,7 +36,7 @@ from reportlab.platypus import (
 )
 
 from .report_schemas import Report, ReportClaim
-from .verify_schemas import VerdictSource
+from .verify_schemas import VerdictSource, VerificationResult
 
 # ---------------------------------------------------------------- design tokens
 
@@ -602,6 +602,30 @@ def _overview_story(st: dict, stats: dict) -> list:
     return story
 
 
+def _correction_story(v: VerificationResult, hexfg: str, S: dict) -> list:
+    """Original and corrected information side by side. A correction is printed only when it was confirmed against
+    a cited source; otherwise the report says so instead of showing a made-up figure."""
+    out: list = []
+    orig = " ".join(x for x in (v.original_value, v.unit) if x) or "as stated in the claim"
+    if v.correction_status == "confirmed":
+        corr = " ".join(x for x in (v.corrected_value, v.unit) if x)
+        period = f"Reference period: {markup(v.reference_period, 60)}" if v.reference_period else "Reference period not stated"
+        cells = [[
+            Paragraph("<font size='7.4' color='#64748b'><b>ORIGINAL (INCORRECT)</b></font><br/>" + f"<font size='11'><b>{markup(orig, 120)}</b></font>", S["cell"]),
+            Paragraph(f"<font size='7.4' color='{hexfg}'><b>CORRECTED (EVIDENCE-SUPPORTED)</b></font><br/>" + f"<font size='11'><b>{markup(corr, 120)}</b></font><br/><font size='7.6' color='#64748b'>{period}</font>", S["cell"]),
+        ]]
+        t = Table(cells, colWidths=[CONTENT_W / 2, CONTENT_W / 2])
+        t.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, LINE), ("LINEAFTER", (0, 0), (0, 0), 0.5, LINE), ("BACKGROUND", (1, 0), (1, 0), PANEL), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+        out += [Paragraph("CORRECTED INFORMATION", S["label"]), t]
+        if v.corrected_claim:
+            out.append(P(v.corrected_claim, S["note"]))
+        if v.correction_explanation:
+            out += [Paragraph("WHY THE CORRECTION IS RIGHT", S["label"]), P(v.correction_explanation, S["body"])]
+    else:
+        out += [Paragraph("CORRECTED INFORMATION", S["label"]), P("A reliable corrected figure could not be confirmed from the evidence collected, so none is shown.", S["note"])]
+    return out
+
+
 def _claim_story(c: ReportClaim, st: dict) -> list:
     S = st
     v = c.verification
@@ -655,8 +679,8 @@ def _claim_story(c: ReportClaim, st: dict) -> list:
         story.append(P(notes[v.claim_type], S["note"]))
 
     story += [Paragraph("AI EXPLANATION", S["label"]), P(v.explanation or "No explanation was provided.", S["body"])]
-    if v.corrected_claim:
-        story += [Paragraph("CORRECTED INFORMATION", S["label"]), P(v.corrected_claim, S["note"])]
+    if c.status in ("INACCURATE", "FALSE"):
+        story += _correction_story(v, hexfg, S)
     if v.evidence_summary:
         story += [Paragraph("EVIDENCE SUMMARY", S["label"]), P(v.evidence_summary, S["body"])]
 
@@ -672,6 +696,8 @@ def _claim_story(c: ReportClaim, st: dict) -> list:
             if s.relevance:
                 line += f"<br/><i><font size='8' color='#475569'>{markup(s.relevance, 400)}</font></i>"
             story.append(Paragraph(line, S["source"], bulletText="•"))
+            if s.snippet:
+                story.append(Paragraph(f"<font size='7.6' color='#475569'>Evidence: “{markup(s.snippet, 400)}”</font>", ParagraphStyle("snip", parent=S["small"], leftIndent=14)))
 
     if v.adjustments:
         story.append(Paragraph("ANALYSIS NOTES", S["label"]))

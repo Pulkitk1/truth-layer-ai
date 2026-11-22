@@ -1,6 +1,7 @@
 "use client";
 
 import { Calendar, ExternalLink, Info, MousePointerClick, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import CorrectionBox from "./CorrectionBox";
 import StatusBadge from "./StatusBadge";
 import { badgeStatus, categoryLabel } from "@/lib/report";
 import type { EvidenceSourceItem, ReportClaim, VerdictSource } from "@/types";
@@ -26,6 +27,7 @@ function SourceCard({
   domain,
   date,
   note,
+  snippet,
   tone,
 }: {
   title: string;
@@ -33,6 +35,7 @@ function SourceCard({
   domain: string;
   date: string | null;
   note?: string;
+  snippet?: string;
   tone: "support" | "contradict" | "neutral";
 }) {
   const border = { support: "border-l-green-500", contradict: "border-l-red-500", neutral: "border-l-slate-300" }[tone];
@@ -61,6 +64,11 @@ function SourceCard({
         <span className="mt-0.5 block text-sm font-semibold text-navy-800">{title}</span>
       )}
       {note && <p className="mt-1 break-words text-xs leading-relaxed text-slate-600">{note}</p>}
+      {snippet && (
+        <blockquote className="mt-1.5 break-words border-l-2 border-slate-200 pl-2 text-xs italic leading-relaxed text-slate-500">
+          {snippet}
+        </blockquote>
+      )}
     </li>
   );
 }
@@ -90,7 +98,7 @@ function Group({
       ) : (
         <ul className="mt-2 space-y-2">
           {sources.map((s) => (
-            <SourceCard key={s.url} title={s.title} url={s.url} domain={s.domain} date={s.published_date} note={s.relevance} tone={tone} />
+            <SourceCard key={s.url} title={s.title} url={s.url} domain={s.domain} date={s.published_date} note={s.relevance} snippet={s.snippet} tone={tone} />
           ))}
         </ul>
       )}
@@ -145,7 +153,7 @@ export default function ClaimDetails({ claim, onClose }: { claim: ReportClaim; o
       {v ? (
         <>
           <section className="mt-5">
-            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">AI explanation</h4>
+            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{claim.status === "INACCURATE" || claim.status === "FALSE" ? "Why it is wrong" : "AI explanation"}</h4>
             <p className="mt-1 text-sm leading-relaxed text-slate-700">{v.explanation}</p>
             {NOTE[v.claim_type] && (
               <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-slate-50 p-2.5 text-xs text-slate-600">
@@ -155,12 +163,9 @@ export default function ClaimDetails({ claim, onClose }: { claim: ReportClaim; o
             )}
           </section>
 
-          {v.corrected_claim && (
-            <section className="mt-4 rounded-xl bg-orange-50 p-3">
-              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-orange-700">Corrected claim</h4>
-              <p className="mt-1 text-sm text-slate-800">{v.corrected_claim}</p>
-            </section>
-          )}
+          <div className="mt-4">
+            <CorrectionBox result={v} />
+          </div>
 
           <section className="mt-4" aria-label="Confidence">
             <div className="flex items-center justify-between text-xs text-slate-500">
