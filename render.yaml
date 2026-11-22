@@ -1,0 +1,90 @@
+# Render Blueprint for TruthLayer AI: two web services from this one repository.
+#
+#   truthlayer-ai-api  Python web service  FastAPI backend (rootDir: backend)
+#   truthlayer-ai      Node web service    Next.js frontend (repository root)
+#
+# The database AND the PDF files live in Neon PostgreSQL, which is not defined here: you pass its connection strings in
+# as secrets. There is no other storage service. Values marked `sync: false` are NOT stored in this file: Render asks
+# for them when you create the Blueprint, so no credential is ever committed. Step-by-step instructions: README.md,
+# section "Deploying on Render".
+#
+# Plans: `free` is enough for an assignment (a free service sleeps after 15 minutes without traffic and takes about a
+# minute to wake up). For an always-on service set `plan: starter` and move `alembic upgrade head` from buildCommand to
+# `preDeployCommand` (pre-deploy commands are not available on the free plan).
+
+services:
+  # ------------------------------------------------------------------ backend
+  - type: web
+    name: truthlayer-ai-api
+    runtime: python
+    region: singapore # next to the Neon project (AWS ap-southeast-1) for the lowest database latency
+    plan: free
+    rootDir: backend
+    # The build step runs the database migrations with the DIRECT Neon connection (DATABASE_DIRECT_URL). A failed
+    # migration fails the deploy and the previous version keeps serving, so a half-migrated app never gets traffic.
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    # Listen on every interface and on the port Render assigns. One worker: the in-memory rate limiter is per process.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Cheap liveness probe that does not touch the database, so Render's frequent probes do not keep Neon awake.
+    # (The full check, with database, schema and production readiness, is GET /api/health.)
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION # fully qualified, as Render requires; the dependency wheels were checked for Python 3.13
+        value: 3.13.5
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: APP_ENV # turns on production behaviour: no /docs, HSTS, and lets /api/health report production_ready
+        value: production
+      # ---- secrets: Render asks for these when the Blueprint is created
+      - key: DATABASE_URL # Neon POOLED connection string (host contains "-pooler"): used by the app
+        sync: false
+      - key: DATABASE_DIRECT_URL # Neon DIRECT connection string (same, without "-pooler"): used only by migrations
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      # ---- depends on the frontend's address: the exact https origin, no trailing slash, never "*"
+      - key: CORS_ORIGINS
+        sync: false # e.g. https://truthlayer-ai.onrender.com
+      # ---- settings with safe production values
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: TAVILY_SEARCH_DEPTH
+        value: basic
+      - key: DOCUMENT_RETENTION_DAYS # documents (with their PDFs and results) are deleted after this many days
+        value: "30"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: TRUSTED_PROXY_COUNT # Render's proxy sits in front of the API
+        value: "1"
+      - key: CLIENT_IP_HEADER # Cloudflare (in front of Render) overwrites this header, so it identifies the real visitor
+        value: CF-Connecting-IP
+      - key: MAX_UPLOAD_MB # PDFs are stored in the database: 20 MB is the maximum
+        value: "20"
+
+  # ------------------------------------------------------------------ frontend
+  - type: web
+    name: truthlayer-ai
+    runtime: node
+    region: singapore
+    plan: free
+    # `--include=dev` because the build needs TypeScript and Tailwind (devDependencies) even when NODE_ENV=production.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start -- -H 0.0.0.0 -p $PORT
+    healthCheckPath: /
+    buildFilter: # a backend-only change does not rebuild the frontend
+      ignoredPaths:
+        - backend/**
+        - tests/**
+        - scripts/**
+        - README.md
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      # The backend's public https address. NEXT_PUBLIC_* values are compiled into the browser bundle at BUILD time (and
+      # shown to every visitor), so this must be a public URL and never a secret. Changing it needs a rebuild.
+      - key: NEXT_PUBLIC_API_URL
+        sync: false # e.g. https://truthlayer-ai-api.onrender.com
