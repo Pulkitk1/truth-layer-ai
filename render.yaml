@@ -5,7 +5,7 @@
 #
 # The database AND the PDF files live in Neon PostgreSQL, which is not defined here: you pass its connection strings in
 # as secrets. There is no other storage service. Values marked `sync: false` are NOT stored in this file: Render asks
-# for them when you create the Blueprint, so no credential is ever committed. Step-by-step instructions: README.md,
+# for them when you create the Blueprint, so no credential is ever committed. Step-by-step instructions: docs/development.md,
 # section "Deploying on Render".
 #
 # Plans: `free` is enough for an assignment (a free service sleeps after 15 minutes without traffic and takes about a
@@ -79,6 +79,7 @@ services:
         - tests/**
         - scripts/**
         - README.md
+        - docs/**
     envVars:
       - key: NODE_VERSION
         value: 24.22.1
